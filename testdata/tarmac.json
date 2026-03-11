@@ -4,21 +4,21 @@
       "name": "test-service",
       "functions": {
         "default": {
-          "filepath": "/testdata/default/tarmac.wasm"
+          "filepath": "/testdata/base/default/tarmac.wasm"
         },
         "kv": {
-          "filepath": "/testdata/kv/tarmac.wasm",
+          "filepath": "/testdata/base/kv/tarmac.wasm",
           "pool_size": 1000
         },
         "logger": {
-          "filepath": "/testdata/logger/tarmac.wasm"
+          "filepath": "/testdata/base/logger/tarmac.wasm"
         },
         "sql": {
-          "filepath": "/testdata/sql/tarmac.wasm",
+          "filepath": "/testdata/base/sql/tarmac.wasm",
           "pool_size": 10
         },
         "func": {
-          "filepath": "/testdata/function/tarmac.wasm",
+          "filepath": "/testdata/base/function/tarmac.wasm",
           "pool_size": 1
         }
       },

@@ -1,20 +1,24 @@
 package main
 
 import (
-	"github.com/sirupsen/logrus"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+
 	"github.com/spf13/viper"
 	_ "github.com/spf13/viper/remote"
+
 	"github.com/tarmac-project/tarmac/pkg/app"
 )
 
-func main() {
-	// Initiate a simple logger
-	log := logrus.New()
+func newLogger() *slog.Logger {
+	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+}
 
-	// Setup Config
-	cfg := viper.New()
-
-	// Set Default Configs
+func setDefaults(cfg *viper.Viper) {
 	cfg.SetDefault("enable_tls", true)
 	cfg.SetDefault("listen_addr", "0.0.0.0:8443")
 	cfg.SetDefault("cert_file", "/certs/cert.crt")
@@ -27,38 +31,72 @@ func main() {
 	cfg.SetDefault("boltdb_bucket", "tarmac")
 	cfg.SetDefault("boltdb_permissions", 0600)
 	cfg.SetDefault("boltdb_timeout", 5)
+	cfg.SetDefault("nats_url", "nats://localhost:4222")
+	cfg.SetDefault("nats_bucket", "tarmac")
 	cfg.SetDefault("grpc_socket_path", "/grpc.sock")
+	cfg.SetDefault("run_mode", "daemon")
+	cfg.SetDefault("text_log_format", false)
+	cfg.SetDefault("http_client_max_response_body_size", 10*1024*1024) // 10MB default
+}
 
-	// Load Config
+func configureConfig(cfg *viper.Viper) {
 	cfg.AddConfigPath("./conf")
 	cfg.SetEnvPrefix("app")
 	cfg.AllowEmptyEnv(true)
 	cfg.AutomaticEnv()
+}
+
+func handleConfigReadResult(log *slog.Logger, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var notFoundErr viper.ConfigFileNotFoundError
+	if errors.As(err, &notFoundErr) {
+		log.Warn("No Config file found, loaded config from Environment - Default path ./conf")
+		return nil
+	}
+
+	return fmt.Errorf("error when fetching configuration: %w", err)
+}
+
+func main() {
+	// Initiate a simple logger
+	log := newLogger()
+
+	// Setup Config
+	cfg := viper.New()
+
+	// Set Default Configs
+	setDefaults(cfg)
+
+	// Load Config
+	configureConfig(cfg)
 	err := cfg.ReadInConfig()
-	if err != nil {
-		switch err.(type) {
-		case viper.ConfigFileNotFoundError:
-			log.Warnf("No Config file found, loaded config from Environment - Default path ./conf")
-		default:
-			log.Fatalf("Error when Fetching Configuration - %s", err)
-		}
+	if err = handleConfigReadResult(log, err); err != nil {
+		log.Error("Error when Fetching Configuration: "+err.Error(), "error", err)
+		os.Exit(1)
 	}
 
 	// Load Config from Consul
 	if cfg.GetBool("use_consul") {
-		log.Infof("Setting up Consul Config source - %s/%s", cfg.GetString("consul_addr"), cfg.GetString("consul_keys_prefix"))
+		log.Info("Setting up Consul Config source",
+			"consul_addr", cfg.GetString("consul_addr"),
+			"consul_keys_prefix", cfg.GetString("consul_keys_prefix"))
 		err = cfg.AddRemoteProvider("consul", cfg.GetString("consul_addr"), cfg.GetString("consul_keys_prefix"))
 		if err != nil {
-			log.Fatalf("Error adding Consul as a remote Configuration Provider - %s", err)
+			log.Error("Error adding Consul as a remote Configuration Provider: "+err.Error(), "error", err)
+			os.Exit(1)
 		}
 		cfg.SetConfigType("json")
 		err = cfg.ReadRemoteConfig()
 		if err != nil {
-			log.Fatalf("Error when Fetching Configuration from Consul - %s", err)
+			log.Error("Error when Fetching Configuration from Consul: "+err.Error(), "error", err)
+			os.Exit(1)
 		}
 
 		if cfg.GetBool("from_consul") {
-			log.Infof("Successfully loaded configuration from consul")
+			log.Info("Successfully loaded configuration from consul")
 		}
 	}
 
@@ -66,8 +104,9 @@ func main() {
 	srv := app.New(cfg)
 	defer srv.Stop()
 	err = srv.Run()
-	if err != nil && err != app.ErrShutdown {
-		log.Fatalf("Service stopped - %s", err)
+	if err != nil && !errors.Is(err, app.ErrShutdown) {
+		log.Error("Service stopped: "+err.Error(), "error", err)
+		os.Exit(1)
 	}
-	log.Infof("Service shutdown - %s", err)
+	log.Info("Service shutdown", "error", err)
 }

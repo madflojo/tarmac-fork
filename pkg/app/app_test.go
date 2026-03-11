@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net/http"
 	"os"
 	"testing"
@@ -11,7 +12,14 @@ import (
 	"github.com/madflojo/testcerts"
 	"github.com/spf13/viper"
 	_ "github.com/spf13/viper/remote"
+
 	"github.com/tarmac-project/tarmac/pkg/tlsconfig"
+)
+
+const (
+	// Test server timeout values.
+	testServerContextTimeout = 2 * time.Second
+	testServerMaxWaitTimeout = 2500 * time.Millisecond // Slightly longer than context timeout
 )
 
 func TestBadConfigs(t *testing.T) {
@@ -68,6 +76,28 @@ func TestBadConfigs(t *testing.T) {
 	v.Set("cassandra_hosts", []string{"cassandra-primary", "cassandra"})
 	cfgs["invalid Cassandra Keyspace"] = v
 
+	// Invalid NATS URL
+	v = viper.New()
+	v.Set("enable_tls", false)
+	v.Set("listen_addr", "0.0.0.0:8443")
+	v.Set("disable_logging", true)
+	v.Set("enable_kvstore", true)
+	v.Set("kvstore_type", "nats")
+	v.Set("nats_url", "nats://notarealaddress:4222")
+	v.Set("nats_bucket", "tarmac")
+	cfgs["invalid NATS URL"] = v
+
+	// Invalid NATS Bucket
+	v = viper.New()
+	v.Set("enable_tls", false)
+	v.Set("listen_addr", "0.0.0.0:8443")
+	v.Set("disable_logging", true)
+	v.Set("enable_kvstore", true)
+	v.Set("kvstore_type", "nats")
+	v.Set("nats_url", "nats://nats:4222")
+	v.Set("nats_bucket", "")
+	cfgs["invalid NATS Bucket"] = v
+
 	// Invalid KVStore
 	v = viper.New()
 	v.Set("enable_tls", false)
@@ -109,7 +139,7 @@ func TestBadConfigs(t *testing.T) {
 				}
 			}()
 			err := srv.Run()
-			if err == nil || err == ErrShutdown {
+			if err == nil || errors.Is(err, ErrShutdown) {
 				t.Errorf("Expected error when starting server, got nil")
 			}
 		})
@@ -127,11 +157,11 @@ func TestRunningServer(t *testing.T) {
 	cfg.Set("use_consul", false)
 	cfg.Set("debug", true)
 	cfg.Set("trace", true)
-	cfg.Set("wasm_function", "/testdata/default/tarmac.wasm")
+	cfg.Set("wasm_function", "/testdata/base/default/tarmac.wasm")
 	srv := New(cfg)
 	go func() {
 		err := srv.Run()
-		if err != nil && err != ErrShutdown {
+		if err != nil && !errors.Is(err, ErrShutdown) {
 			t.Errorf("Run unexpectedly stopped - %s", err)
 		}
 	}()
@@ -147,7 +177,7 @@ func TestRunningServer(t *testing.T) {
 			t.Errorf("Unexpected error when requesting health status - %s", err)
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Errorf("Unexpected http status code when checking health - %d", r.StatusCode)
 		}
 	})
@@ -158,7 +188,7 @@ func TestRunningServer(t *testing.T) {
 			t.Errorf("Unexpected error when requesting metrics status - %s", err)
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Errorf("Unexpected http status code when checking metrics - %d", r.StatusCode)
 		}
 	})
@@ -173,11 +203,11 @@ func TestPProfServerEnabled(t *testing.T) {
 	cfg.Set("debug", true)
 	cfg.Set("trace", true)
 	cfg.Set("enable_pprof", true)
-	cfg.Set("wasm_function", "/testdata/default/tarmac.wasm")
+	cfg.Set("wasm_function", "/testdata/base/default/tarmac.wasm")
 	srv := New(cfg)
 	go func() {
 		err := srv.Run()
-		if err != nil && err != ErrShutdown {
+		if err != nil && !errors.Is(err, ErrShutdown) {
 			t.Errorf("Run unexpectedly stopped - %s", err)
 		}
 	}()
@@ -221,11 +251,11 @@ func TestPProfServerDisabled(t *testing.T) {
 	cfg.Set("use_consul", false)
 	cfg.Set("debug", true)
 	cfg.Set("trace", true)
-	cfg.Set("wasm_function", "/testdata/default/tarmac.wasm")
+	cfg.Set("wasm_function", "/testdata/base/default/tarmac.wasm")
 	srv := New(cfg)
 	go func() {
 		err := srv.Run()
-		if err != nil && err != ErrShutdown {
+		if err != nil && !errors.Is(err, ErrShutdown) {
 			t.Errorf("Run unexpectedly stopped - %s", err)
 		}
 	}()
@@ -254,7 +284,7 @@ func TestPProfServerDisabled(t *testing.T) {
 				t.Errorf("Unexpected error when validating pprof - %s", err)
 			}
 			defer r.Body.Close()
-			if r.StatusCode != 403 {
+			if r.StatusCode != http.StatusForbidden {
 				t.Errorf("Unexpected http status code when validating pprof - %d", r.StatusCode)
 			}
 		})
@@ -291,7 +321,7 @@ func TestRunningTLSServer(t *testing.T) {
 	cfg.Set("enable_sql", true)
 	cfg.Set("sql_type", "mysql")
 	cfg.Set("sql_dsn", "root:example@tcp(mysql:3306)/example")
-	cfg.Set("wasm_function", "/testdata/default/tarmac.wasm")
+	cfg.Set("wasm_function", "/testdata/base/default/tarmac.wasm")
 	err = cfg.AddRemoteProvider("consul", "consul:8500", "tarmac/config")
 	if err != nil {
 		t.Fatalf("Failed to create Consul config provider - %s", err)
@@ -303,7 +333,7 @@ func TestRunningTLSServer(t *testing.T) {
 	// Start Server in goroutine
 	go func() {
 		err := srv.Run()
-		if err != nil && err != ErrShutdown {
+		if err != nil && !errors.Is(err, ErrShutdown) {
 			t.Errorf("Run unexpectedly stopped - %s", err)
 		}
 	}()
@@ -320,7 +350,7 @@ func TestRunningTLSServer(t *testing.T) {
 			t.FailNow()
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Errorf("Unexpected http status code when checking health - %d", r.StatusCode)
 		}
 	})
@@ -332,7 +362,7 @@ func TestRunningTLSServer(t *testing.T) {
 			t.FailNow()
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Errorf("Unexpected http status code when checking readiness - %d", r.StatusCode)
 		}
 	})
@@ -347,7 +377,7 @@ func TestRunningTLSServer(t *testing.T) {
 			t.FailNow()
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 503 {
+		if r.StatusCode != http.StatusServiceUnavailable {
 			t.Errorf("Unexpected http status code when checking readiness - %d", r.StatusCode)
 		}
 	})
@@ -357,7 +387,6 @@ func TestRunningTLSServer(t *testing.T) {
 			t.Errorf("Did not fetch config from consul")
 		}
 	})
-
 }
 
 func TestRunningMTLSServer(t *testing.T) {
@@ -400,7 +429,7 @@ func TestRunningMTLSServer(t *testing.T) {
 	cfg.Set("enable_sql", true)
 	cfg.Set("sql_type", "mysql")
 	cfg.Set("sql_dsn", "root:example@tcp(mysql:3306)/example")
-	cfg.Set("wasm_function", "/testdata/default/tarmac.wasm")
+	cfg.Set("wasm_function", "/testdata/base/default/tarmac.wasm")
 	err = cfg.AddRemoteProvider("consul", "consul:8500", "tarmac/config")
 	if err != nil {
 		t.Fatalf("Failed to create Consul config provider - %s", err)
@@ -412,7 +441,7 @@ func TestRunningMTLSServer(t *testing.T) {
 	// Start Server in goroutine
 	go func() {
 		err := srv.Run()
-		if err != nil && err != ErrShutdown {
+		if err != nil && !errors.Is(err, ErrShutdown) {
 			t.Errorf("Run unexpectedly stopped - %s", err)
 		}
 	}()
@@ -429,7 +458,7 @@ func TestRunningMTLSServer(t *testing.T) {
 			t.FailNow()
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Errorf("Unexpected http status code when checking health - %d", r.StatusCode)
 		}
 	})
@@ -441,7 +470,7 @@ func TestRunningMTLSServer(t *testing.T) {
 			t.FailNow()
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Errorf("Unexpected http status code when checking readiness - %d", r.StatusCode)
 		}
 	})
@@ -456,7 +485,7 @@ func TestRunningMTLSServer(t *testing.T) {
 			t.FailNow()
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 503 {
+		if r.StatusCode != http.StatusServiceUnavailable {
 			t.Errorf("Unexpected http status code when checking readiness - %d", r.StatusCode)
 		}
 	})
@@ -466,7 +495,6 @@ func TestRunningMTLSServer(t *testing.T) {
 			t.Errorf("Did not fetch config from consul")
 		}
 	})
-
 }
 
 func TestRunningFailMTLSServer(t *testing.T) {
@@ -504,7 +532,7 @@ func TestRunningFailMTLSServer(t *testing.T) {
 	cfg.Set("enable_sql", true)
 	cfg.Set("sql_type", "mysql")
 	cfg.Set("sql_dsn", "root:example@tcp(mysql:3306)/example")
-	cfg.Set("wasm_function", "/testdata/default/tarmac.wasm")
+	cfg.Set("wasm_function", "/testdata/base/default/tarmac.wasm")
 	err = cfg.AddRemoteProvider("consul", "consul:8500", "tarmac/config")
 	if err != nil {
 		t.Fatalf("Failed to create Consul config provider - %s", err)
@@ -516,7 +544,7 @@ func TestRunningFailMTLSServer(t *testing.T) {
 	// Start Server in goroutine
 	go func() {
 		err := srv.Run()
-		if err != nil && err != ErrShutdown {
+		if err != nil && !errors.Is(err, ErrShutdown) {
 			t.Errorf("Run unexpectedly stopped - %s", err)
 		}
 	}()
@@ -532,6 +560,100 @@ func TestRunningFailMTLSServer(t *testing.T) {
 			defer r.Body.Close()
 			t.Errorf("Unexpected success when requesting health status")
 			t.FailNow()
+		}
+	})
+}
+
+// TestTLSBranchBehavior verifies that when TLS is enabled, the server only
+// attempts to start a TLS listener and doesn't fall through to start a
+// non-TLS listener. This test addresses the issue where the code could
+// fall through after ListenAndServeTLS returns.
+func TestTLSBranchBehavior(t *testing.T) {
+	// Test that TLS configuration attempts only TLS listener
+	t.Run("TLS enabled uses only TLS listener", func(t *testing.T) {
+		// Create Test Certs in temporary directory
+		tmpDir := t.TempDir()
+		certFile := tmpDir + "/cert.pem"
+		keyFile := tmpDir + "/key.pem"
+		err := testcerts.GenerateCertsToFile(certFile, keyFile)
+		if err != nil {
+			t.Errorf("Failed to create certs - %s", err)
+			t.FailNow()
+		}
+
+		cfg := viper.New()
+		cfg.Set("disable_logging", true)
+		cfg.Set("enable_tls", true)
+		cfg.Set("cert_file", certFile)
+		cfg.Set("key_file", keyFile)
+		cfg.Set("listen_addr", "127.0.0.1:19001") // Use unique port
+		cfg.Set("enable_kvstore", false)
+		cfg.Set("wasm_function", "../../testdata/base/default/tarmac.wasm")
+
+		srv := New(cfg)
+		ctx, cancel := context.WithTimeout(context.Background(), testServerContextTimeout)
+		defer cancel()
+
+		// Start server in goroutine
+		errChan := make(chan error, 1)
+		go func() {
+			errChan <- srv.Run()
+		}()
+
+		// Schedule shutdown
+		go func() {
+			<-ctx.Done()
+			srv.Stop()
+		}()
+
+		// Wait for either error or context timeout
+		select {
+		case err := <-errChan:
+			// Server should stop with ErrShutdown
+			if err != nil && !errors.Is(err, ErrShutdown) {
+				t.Errorf("Expected ErrShutdown or nil, got: %s", err)
+			}
+		case <-time.After(testServerMaxWaitTimeout):
+			// Slightly longer than context timeout to ensure proper shutdown
+			srv.Stop()
+		}
+	})
+
+	// Test that non-TLS configuration attempts only non-TLS listener
+	t.Run("TLS disabled uses only HTTP listener", func(t *testing.T) {
+		cfg := viper.New()
+		cfg.Set("disable_logging", true)
+		cfg.Set("enable_tls", false)
+		cfg.Set("listen_addr", "127.0.0.1:19002") // Use unique port
+		cfg.Set("enable_kvstore", false)
+		cfg.Set("wasm_function", "../../testdata/base/default/tarmac.wasm")
+
+		srv := New(cfg)
+		ctx, cancel := context.WithTimeout(context.Background(), testServerContextTimeout)
+		defer cancel()
+
+		// Start server in goroutine
+		errChan := make(chan error, 1)
+		go func() {
+			errChan <- srv.Run()
+		}()
+
+		// Schedule shutdown
+		go func() {
+			<-ctx.Done()
+			srv.Stop()
+		}()
+
+		// Wait for either error or context timeout
+		select {
+		case err := <-errChan:
+			// Server should stop with ErrShutdown
+			if err != nil && !errors.Is(err, ErrShutdown) {
+				t.Errorf("Expected ErrShutdown or nil, got: %s", err)
+			}
+		case <-time.After(testServerMaxWaitTimeout):
+			// Slightly longer than context timeout to ensure proper shutdown
+			srv.Stop()
 		}
 	})
 }

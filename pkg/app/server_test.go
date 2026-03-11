@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -26,12 +27,12 @@ func TestBasicFunction(t *testing.T) {
 	cfg.Set("disable_logging", false)
 	cfg.Set("debug", true)
 	cfg.Set("listen_addr", "localhost:9001")
-	cfg.Set("wasm_function", "/testdata/default/tarmac.wasm")
+	cfg.Set("wasm_function", "/testdata/base/default/tarmac.wasm")
 
 	srv := New(cfg)
 	go func() {
 		err := srv.Run()
-		if err != nil && err != ErrShutdown {
+		if err != nil && !errors.Is(err, ErrShutdown) {
 			t.Errorf("Run unexpectedly stopped - %s", err)
 		}
 	}()
@@ -42,12 +43,12 @@ func TestBasicFunction(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	t.Run("Simple Payload", func(t *testing.T) {
-		r, err := http.Post("http://localhost:9001/", "application/text", bytes.NewBuffer([]byte("Howdie")))
+		r, err := http.Post("http://localhost:9001/", "application/text", bytes.NewBufferString("Howdie"))
 		if err != nil {
 			t.Fatalf("Unexpected error when making HTTP request - %s", err)
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Errorf("Unexpected http status code when making HTTP request %d", r.StatusCode)
 		}
 		body, err := io.ReadAll(r.Body)
@@ -65,18 +66,18 @@ func TestBasicFunction(t *testing.T) {
 			t.Fatalf("Unexpected error when making HTTP request - %s", err)
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Errorf("Unexpected http status code when making request %d", r.StatusCode)
 		}
 	})
 
 	t.Run("No Payload", func(t *testing.T) {
-		r, err := http.Post("http://localhost:9001/", "application/text", bytes.NewBuffer([]byte("")))
+		r, err := http.Post("http://localhost:9001/", "application/text", bytes.NewBufferString(""))
 		if err != nil {
 			t.Fatalf("Unexpected error when making HTTP request - %s", err)
 		}
 		defer r.Body.Close()
-		if r.StatusCode != 200 {
+		if r.StatusCode != http.StatusOK {
 			t.Errorf("Unexpected http status code when making HTTP request %d", r.StatusCode)
 		}
 		body, err := io.ReadAll(r.Body)
@@ -87,7 +88,39 @@ func TestBasicFunction(t *testing.T) {
 			t.Errorf("Unexpected reply from http response - got %s", body)
 		}
 	})
+}
 
+func TestMaintenanceMode(t *testing.T) {
+	cfg := viper.New()
+	cfg.Set("disable_logging", false)
+	cfg.Set("debug", true)
+	cfg.Set("listen_addr", "localhost:9001")
+	cfg.Set("wasm_function", "/testdata/base/default/tarmac.wasm")
+	cfg.Set("enable_maintenance_mode", true)
+
+	srv := New(cfg)
+	go func() {
+		err := srv.Run()
+		if err != nil && !errors.Is(err, ErrShutdown) {
+			t.Errorf("Run unexpectedly stopped - %s", err)
+		}
+	}()
+	// Clean up
+	defer srv.Stop()
+
+	// Wait for Server to start
+	time.Sleep(2 * time.Second)
+
+	t.Run("Check Readiness", func(t *testing.T) {
+		r, err := http.Get("http://localhost:9001/ready")
+		if err != nil {
+			t.Fatalf("Unexpected error when making HTTP request - %s", err)
+		}
+		defer r.Body.Close()
+		if r.StatusCode != http.StatusServiceUnavailable {
+			t.Errorf("Unexpected http status code when making request %d", r.StatusCode)
+		}
+	})
 }
 
 type FullServiceTestCase struct {
@@ -118,6 +151,18 @@ func TestFullService(t *testing.T) {
 	tc.cfg.Set("wasm_function_config", "/testdata/tarmac.json")
 	tt = append(tt, tc)
 
+	tc = FullServiceTestCase{name: "NATS", cfg: viper.New()}
+	tc.cfg.Set("disable_logging", false)
+	tc.cfg.Set("debug", true)
+	tc.cfg.Set("enable_tls", false)
+	tc.cfg.Set("listen_addr", "localhost:9001")
+	tc.cfg.Set("kvstore_type", "nats")
+	tc.cfg.Set("nats_url", "nats://nats:4222")
+	tc.cfg.Set("nats_bucket", "tarmac")
+	tc.cfg.Set("enable_kvstore", true)
+	tc.cfg.Set("wasm_function_config", "/testdata/tarmac.json")
+	tt = append(tt, tc)
+
 	tc = FullServiceTestCase{name: "Cassandra", cfg: viper.New()}
 	tc.cfg.Set("disable_logging", false)
 	tc.cfg.Set("debug", true)
@@ -129,7 +174,7 @@ func TestFullService(t *testing.T) {
 	tc.cfg.Set("wasm_function_config", "/testdata/tarmac.json")
 	tt = append(tt, tc)
 
-	fh, err := os.CreateTemp("", "*.db")
+	fh, err := os.CreateTemp(t.TempDir(), "*.db")
 	if err != nil {
 		t.Fatalf("Unexpected error creating temp file - %s", err)
 	}
@@ -167,12 +212,31 @@ func TestFullService(t *testing.T) {
 	tc.cfg.Set("wasm_function_config", "/testdata/tarmac.json")
 	tt = append(tt, tc)
 
+	tc = FullServiceTestCase{name: "In-Memory SDKv1", cfg: viper.New()}
+	tc.cfg.Set("disable_logging", false)
+	tc.cfg.Set("debug", true)
+	tc.cfg.Set("listen_addr", "localhost:9001")
+	tc.cfg.Set("kvstore_type", "in-memory")
+	tc.cfg.Set("enable_kvstore", true)
+	tc.cfg.Set("wasm_function_config", "/testdata/sdkv1/tarmac.json")
+	tt = append(tt, tc)
+
+	tc = FullServiceTestCase{name: "MySQL SDKv1", cfg: viper.New()}
+	tc.cfg.Set("disable_logging", false)
+	tc.cfg.Set("debug", true)
+	tc.cfg.Set("listen_addr", "localhost:9001")
+	tc.cfg.Set("enable_sql", true)
+	tc.cfg.Set("sql_type", "mysql")
+	tc.cfg.Set("sql_dsn", "root:example@tcp(mysql:3306)/example")
+	tc.cfg.Set("wasm_function_config", "/testdata/sdkv1/tarmac.json")
+	tt = append(tt, tc)
+
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := New(tc.cfg)
 			go func() {
 				err := srv.Run()
-				if err != nil && err != ErrShutdown {
+				if err != nil && !errors.Is(err, ErrShutdown) {
 					t.Errorf("Run unexpectedly stopped - %s", err)
 				}
 			}()
@@ -184,12 +248,16 @@ func TestFullService(t *testing.T) {
 
 			// Call /logger with POST
 			t.Run("Do a Post on /logger", func(t *testing.T) {
-				r, err := http.Post("http://localhost:9001/logger", "application/text", bytes.NewBuffer([]byte("Test Payload")))
+				r, err := http.Post(
+					"http://localhost:9001/logger",
+					"application/text",
+					bytes.NewBufferString("Test Payload"),
+				)
 				if err != nil {
 					t.Fatalf("Unexpected error when making HTTP request - %s", err)
 				}
 				defer r.Body.Close()
-				if r.StatusCode != 200 {
+				if r.StatusCode != http.StatusOK {
 					t.Errorf("Unexpected http status code when making HTTP request %d", r.StatusCode)
 				}
 				body, err := io.ReadAll(r.Body)
@@ -208,7 +276,7 @@ func TestFullService(t *testing.T) {
 						t.Fatalf("Unexpected error when making HTTP request - %s", err)
 					}
 					defer r.Body.Close()
-					if r.StatusCode != 200 {
+					if r.StatusCode != http.StatusOK {
 						t.Errorf("Unexpected http status code when making request %d", r.StatusCode)
 					}
 				})
@@ -221,7 +289,7 @@ func TestFullService(t *testing.T) {
 						t.Fatalf("Unexpected error when making HTTP request - %s", err)
 					}
 					defer r.Body.Close()
-					if r.StatusCode != 200 {
+					if r.StatusCode != http.StatusOK {
 						t.Errorf("Unexpected http status code when making request %d", r.StatusCode)
 					}
 				})
@@ -233,11 +301,10 @@ func TestFullService(t *testing.T) {
 					t.Fatalf("Unexpected error when making HTTP request - %s", err)
 				}
 				defer r.Body.Close()
-				if r.StatusCode != 200 {
+				if r.StatusCode != http.StatusOK {
 					t.Errorf("Unexpected http status code when making request %d", r.StatusCode)
 				}
 			})
-
 		})
 	}
 }
@@ -258,7 +325,10 @@ func TestInitFuncs(t *testing.T) {
 	tc.cfg.Set("listen_addr", "localhost:9001")
 	tc.cfg.Set("kvstore_type", "in-memory")
 	tc.cfg.Set("enable_kvstore", true)
-	tc.config = []byte(`{"services":{"test-service":{"name":"test-service","functions":{"default":{"filepath":"/testdata/default/tarmac.wasm","pool_size":1}},"routes":[{"type":"init","function":"default"}]}}}`)
+	tc.cfg.Set("run_mode", "job")
+	tc.config = []byte(
+		`{"services":{"test-service":{"name":"test-service","functions":{"default":{"filepath":"/testdata/base/default/tarmac.wasm","pool_size":1}},"routes":[{"type":"init","function":"default"}]}}}`,
+	)
 	tt = append(tt, tc)
 
 	tc = InitFuncTestCase{name: "Fails", cfg: viper.New()}
@@ -267,7 +337,10 @@ func TestInitFuncs(t *testing.T) {
 	tc.cfg.Set("listen_addr", "localhost:9001")
 	tc.cfg.Set("kvstore_type", "in-memory")
 	tc.cfg.Set("enable_kvstore", true)
-	tc.config = []byte(`{"services":{"test-service":{"name":"test-service","functions":{"fail":{"filepath":"/testdata/fail/tarmac.wasm","pool_size":1}},"routes":[{"type":"init","function":"fail"}]}}}`)
+	tc.cfg.Set("run_mode", "job")
+	tc.config = []byte(
+		`{"services":{"test-service":{"name":"test-service","functions":{"fail":{"filepath":"/testdata/base/fail/tarmac.wasm","pool_size":1}},"routes":[{"type":"init","function":"fail"}]}}}`,
+	)
 	tc.err = true
 	tt = append(tt, tc)
 
@@ -277,7 +350,10 @@ func TestInitFuncs(t *testing.T) {
 	tc.cfg.Set("listen_addr", "localhost:9001")
 	tc.cfg.Set("kvstore_type", "in-memory")
 	tc.cfg.Set("enable_kvstore", true)
-	tc.config = []byte(`{"services":{"test-service":{"name":"test-service","functions":{"successafter5":{"filepath":"/testdata/successafter5/tarmac.wasm","pool_size":1}},"routes":[{"type":"init","retries":10,"function":"successafter5"}]}}}`)
+	tc.cfg.Set("run_mode", "job")
+	tc.config = []byte(
+		`{"services":{"test-service":{"name":"test-service","functions":{"successafter5":{"filepath":"/testdata/base/successafter5/tarmac.wasm","pool_size":1}},"routes":[{"type":"init","retries":10,"function":"successafter5"}]}}}`,
+	)
 	tt = append(tt, tc)
 
 	tc = InitFuncTestCase{name: "Fail After 10 Retries", cfg: viper.New()}
@@ -286,14 +362,17 @@ func TestInitFuncs(t *testing.T) {
 	tc.cfg.Set("listen_addr", "localhost:9001")
 	tc.cfg.Set("kvstore_type", "in-memory")
 	tc.cfg.Set("enable_kvstore", true)
-	tc.config = []byte(`{"services":{"test-service":{"name":"test-service","functions":{"fail":{"filepath":"/testdata/fail/tarmac.wasm","pool_size":1}},"routes":[{"type":"init","retries":10,"function":"fail"}]}}}`)
+	tc.cfg.Set("run_mode", "job")
+	tc.config = []byte(
+		`{"services":{"test-service":{"name":"test-service","functions":{"fail":{"filepath":"/testdata/base/fail/tarmac.wasm","pool_size":1}},"routes":[{"type":"init","retries":10,"function":"fail"}]}}}`,
+	)
 	tc.err = true
 	tt = append(tt, tc)
 
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
 			// Write the config to a temp file
-			fh, err := os.CreateTemp("", "*.json")
+			fh, err := os.CreateTemp(t.TempDir(), "*.json")
 			if err != nil {
 				t.Fatalf("Unexpected error creating temp file - %s", err)
 			}
@@ -321,11 +400,14 @@ func TestInitFuncs(t *testing.T) {
 
 			// Start the server
 			err = srv.Run()
-			if err != nil && err != ErrShutdown {
+			if err != nil && !errors.Is(err, ErrShutdown) {
 				if tc.err {
 					return
 				}
 				t.Errorf("Run unexpectedly stopped - %s", err)
+			}
+			if errors.Is(err, ErrShutdown) && ctx.Err() == context.DeadlineExceeded && !tc.err {
+				t.Errorf("Server did not start and shutdown as expected")
 			}
 
 			if ctx.Err() == context.DeadlineExceeded && tc.err {
@@ -340,11 +422,11 @@ func TestWASMRunner(t *testing.T) {
 	cfg.Set("disable_logging", false)
 	cfg.Set("debug", true)
 	cfg.Set("listen_addr", "localhost:9001")
-	cfg.Set("wasm_function", "/testdata/default/tarmac.wasm")
+	cfg.Set("wasm_function", "/testdata/base/default/tarmac.wasm")
 	srv := New(cfg)
 	go func() {
 		err := srv.Run()
-		if err != nil && err != ErrShutdown {
+		if err != nil && !errors.Is(err, ErrShutdown) {
 			t.Errorf("Run unexpectedly stopped - %s", err)
 		}
 	}()
@@ -394,5 +476,4 @@ func TestWASMRunner(t *testing.T) {
 			}
 		})
 	}
-
 }

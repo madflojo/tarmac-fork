@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"crypto/md5"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -10,7 +11,11 @@ import (
 	"testing"
 
 	"github.com/pquerna/ffjson/ffjson"
+
 	"github.com/tarmac-project/tarmac"
+
+	proto "github.com/tarmac-project/protobuf-go/sdk/http"
+	pb "google.golang.org/protobuf/proto"
 )
 
 type HTTPClientCase struct {
@@ -20,6 +25,7 @@ type HTTPClientCase struct {
 	name     string
 	call     string
 	json     string
+	proto    *proto.HTTPClient
 }
 
 func Test(t *testing.T) {
@@ -34,14 +40,14 @@ func Test(t *testing.T) {
 		w.Header().Set("Server", "tarmac")
 
 		// Check Header
-		if r.Header.Get("teapot") != "true" {
+		if r.Header.Get("Teapot") != "true" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
 		// Process methods with and without payloads
 		switch r.Method {
-		case "POST", "PUT", "PATCH":
+		case http.MethodPost, http.MethodPut, http.MethodPatch:
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
@@ -51,7 +57,7 @@ func Test(t *testing.T) {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			fmt.Fprintf(w, "%s", body)
+			_, _ = fmt.Fprintf(w, "%s", body)
 		default:
 			return
 		}
@@ -67,6 +73,12 @@ func Test(t *testing.T) {
 		name:     "Simple GET",
 		call:     "Call",
 		json:     fmt.Sprintf(`{"method":"GET","headers":{"teapot": "true"},"insecure":true,"url":"%s"}`, ts.URL),
+		proto: &proto.HTTPClient{
+			Method:   "GET",
+			Headers:  map[string]string{"teapot": "true"},
+			Insecure: true,
+			Url:      ts.URL,
+		},
 	})
 
 	tc = append(tc, HTTPClientCase{
@@ -76,6 +88,11 @@ func Test(t *testing.T) {
 		name:     "Simple GET without SkipVerify",
 		call:     "Call",
 		json:     fmt.Sprintf(`{"method":"GET","headers":{"teapot": "true"},"url":"%s"}`, ts.URL),
+		proto: &proto.HTTPClient{
+			Method:  "GET",
+			Headers: map[string]string{"teapot": "true"},
+			Url:     ts.URL,
+		},
 	})
 
 	tc = append(tc, HTTPClientCase{
@@ -85,6 +102,12 @@ func Test(t *testing.T) {
 		name:     "Simple HEAD",
 		call:     "Call",
 		json:     fmt.Sprintf(`{"method":"HEAD","headers":{"teapot": "true"},"insecure":true,"url":"%s"}`, ts.URL),
+		proto: &proto.HTTPClient{
+			Method:   "HEAD",
+			Headers:  map[string]string{"teapot": "true"},
+			Insecure: true,
+			Url:      ts.URL,
+		},
 	})
 
 	tc = append(tc, HTTPClientCase{
@@ -94,6 +117,12 @@ func Test(t *testing.T) {
 		name:     "Simple DELETE",
 		call:     "Call",
 		json:     fmt.Sprintf(`{"method":"DELETE","headers":{"teapot": "true"},"insecure":true,"url":"%s"}`, ts.URL),
+		proto: &proto.HTTPClient{
+			Method:   "DELETE",
+			Headers:  map[string]string{"teapot": "true"},
+			Insecure: true,
+			Url:      ts.URL,
+		},
 	})
 
 	tc = append(tc, HTTPClientCase{
@@ -102,7 +131,17 @@ func Test(t *testing.T) {
 		httpCode: 200,
 		name:     "Simple POST",
 		call:     "Call",
-		json:     fmt.Sprintf(`{"method":"POST","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"UE9TVA=="}`, ts.URL),
+		json: fmt.Sprintf(
+			`{"method":"POST","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"UE9TVA=="}`,
+			ts.URL,
+		),
+		proto: &proto.HTTPClient{
+			Method:   "POST",
+			Headers:  map[string]string{"teapot": "true"},
+			Insecure: true,
+			Url:      ts.URL,
+			Body:     []byte("POST"),
+		},
 	})
 
 	tc = append(tc, HTTPClientCase{
@@ -111,7 +150,17 @@ func Test(t *testing.T) {
 		httpCode: 400,
 		name:     "Invalid POST",
 		call:     "Call",
-		json:     fmt.Sprintf(`{"method":"POST","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"NotValid"}`, ts.URL),
+		json: fmt.Sprintf(
+			`{"method":"POST","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"NotValid"}`,
+			ts.URL,
+		),
+		proto: &proto.HTTPClient{
+			Method:   "POST",
+			Headers:  map[string]string{"teapot": "true"},
+			Insecure: true,
+			Url:      ts.URL,
+			Body:     []byte("NotValid"),
+		},
 	})
 
 	tc = append(tc, HTTPClientCase{
@@ -120,7 +169,17 @@ func Test(t *testing.T) {
 		httpCode: 200,
 		name:     "Simple PUT",
 		call:     "Call",
-		json:     fmt.Sprintf(`{"method":"PUT","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"UFVU"}`, ts.URL),
+		json: fmt.Sprintf(
+			`{"method":"PUT","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"UFVU"}`,
+			ts.URL,
+		),
+		proto: &proto.HTTPClient{
+			Method:   "PUT",
+			Headers:  map[string]string{"teapot": "true"},
+			Insecure: true,
+			Url:      ts.URL,
+			Body:     []byte("PUT"),
+		},
 	})
 
 	tc = append(tc, HTTPClientCase{
@@ -129,7 +188,17 @@ func Test(t *testing.T) {
 		httpCode: 400,
 		name:     "Invalid PUT",
 		call:     "Call",
-		json:     fmt.Sprintf(`{"method":"PUT","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"NotValid"}`, ts.URL),
+		json: fmt.Sprintf(
+			`{"method":"PUT","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"NotValid"}`,
+			ts.URL,
+		),
+		proto: &proto.HTTPClient{
+			Method:   "PUT",
+			Headers:  map[string]string{"teapot": "true"},
+			Insecure: true,
+			Url:      ts.URL,
+			Body:     []byte("NotValid"),
+		},
 	})
 
 	tc = append(tc, HTTPClientCase{
@@ -138,7 +207,17 @@ func Test(t *testing.T) {
 		httpCode: 200,
 		name:     "Simple PATCH",
 		call:     "Call",
-		json:     fmt.Sprintf(`{"method":"PATCH","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"UEFUQ0g="}`, ts.URL),
+		json: fmt.Sprintf(
+			`{"method":"PATCH","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"UEFUQ0g="}`,
+			ts.URL,
+		),
+		proto: &proto.HTTPClient{
+			Method:   "PATCH",
+			Headers:  map[string]string{"teapot": "true"},
+			Insecure: true,
+			Url:      ts.URL,
+			Body:     []byte("PATCH"),
+		},
 	})
 
 	tc = append(tc, HTTPClientCase{
@@ -147,7 +226,17 @@ func Test(t *testing.T) {
 		httpCode: 400,
 		name:     "Simple PATCH",
 		call:     "Call",
-		json:     fmt.Sprintf(`{"method":"PATCH","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"NotValid"}`, ts.URL),
+		json: fmt.Sprintf(
+			`{"method":"PATCH","headers":{"teapot": "true"},"insecure":true,"url":"%s","body":"NotValid"}`,
+			ts.URL,
+		),
+		proto: &proto.HTTPClient{
+			Method:   "PATCH",
+			Headers:  map[string]string{"teapot": "true"},
+			Insecure: true,
+			Url:      ts.URL,
+			Body:     []byte("NotValid"),
+		},
 	})
 
 	// Loop through test cases executing and validating
@@ -155,56 +244,416 @@ func Test(t *testing.T) {
 		switch c.call {
 		case "Call":
 			t.Run(c.name+" Call", func(t *testing.T) {
-				// Call http callback
-				b, err := h.Call([]byte(c.json))
-				if err != nil && !c.err {
-					t.Fatalf(" Callback failed unexpectedly - %s", err)
-				}
-				if err == nil && c.err {
-					t.Fatalf(" Callback unexpectedly passed")
-				}
+				t.Run("JSON", func(t *testing.T) {
+					// Call http callback
+					b, err := h.Call([]byte(c.json))
+					if err != nil && !c.err {
+						t.Fatalf(" Callback failed unexpectedly - %s", err)
+					}
+					if err == nil && c.err {
+						t.Fatalf(" Callback unexpectedly passed")
+					}
 
-				// Validate Response
-				var rsp tarmac.HTTPClientResponse
-				err = ffjson.Unmarshal(b, &rsp)
-				if err != nil {
-					t.Fatalf(" Callback Set replied with an invalid JSON - %s", err)
-				}
-
-				// Tarmac Response
-				if rsp.Status.Code == 200 && !c.pass {
-					t.Fatalf(" Callback Set returned an unexpected success - %+v", rsp)
-				}
-				if rsp.Status.Code != 200 && c.pass {
-					t.Fatalf(" Callback Set returned an unexpected failure - %+v", rsp)
-				}
-
-				// HTTP Response
-				if rsp.Code != c.httpCode {
-					t.Fatalf(" returned an unexpected response code - %+v", rsp)
-					return
-				}
-
-				// Validate Response Header
-				v, ok := rsp.Headers["server"]
-				if (!ok || v != "tarmac") && rsp.Code == 200 {
-					t.Errorf(" returned an unexpected header - %+v", rsp)
-				}
-
-				// Validate Payload
-				if len(rsp.Body) > 0 {
-					body, err := base64.StdEncoding.DecodeString(rsp.Body)
+					// Validate Response
+					var rsp tarmac.HTTPClientResponse
+					err = ffjson.Unmarshal(b, &rsp)
 					if err != nil {
-						t.Fatalf("Error decoding  returned body - %s", err)
+						t.Fatalf(" Callback Set replied with an invalid JSON - %s", err)
 					}
-					switch string(body) {
-					case "PUT", "POST", "PATCH":
+
+					// Tarmac Response
+					if rsp.Status.Code == 200 && !c.pass {
+						t.Fatalf(" Callback Set returned an unexpected success - %+v", rsp)
+					}
+					if rsp.Status.Code != 200 && c.pass {
+						t.Fatalf(" Callback Set returned an unexpected failure - %+v", rsp)
+					}
+
+					// HTTP Response
+					if rsp.Code != c.httpCode {
+						t.Fatalf(" returned an unexpected response code - %+v", rsp)
 						return
-					default:
-						t.Errorf(" returned unexpected payload - %s", body)
 					}
-				}
+
+					// Validate Response Header
+					v, ok := rsp.Headers["server"]
+					if (!ok || v != "tarmac") && rsp.Code == 200 {
+						t.Errorf(" returned an unexpected header - %+v", rsp)
+					}
+
+					// Validate Payload
+					if len(rsp.Body) > 0 {
+						body, err := base64.StdEncoding.DecodeString(rsp.Body)
+						if err != nil {
+							t.Fatalf("Error decoding  returned body - %s", err)
+						}
+						switch string(body) {
+						case "PUT", "POST", "PATCH":
+							return
+						default:
+							t.Errorf(" returned unexpected payload - %s", body)
+						}
+					}
+				})
+				t.Run("Protobuf", func(t *testing.T) {
+					// Generate Protobuf
+					msg, err := pb.Marshal(c.proto)
+					if err != nil {
+						t.Fatalf("Unable to marshal protobuf - %s", err)
+					}
+
+					// Call http callback
+					b, err := h.Call(msg)
+					if err != nil && !c.err {
+						t.Fatalf(" Callback failed unexpectedly - %s", err)
+					}
+
+					// Validate protobuf response
+					var rsp proto.HTTPClientResponse
+					err = pb.Unmarshal(b, &rsp)
+					if err != nil {
+						t.Fatalf(" Callback Set replied with an invalid Protobuf - %s", err)
+					}
+
+					// Tarmac Response
+					if rsp.GetStatus().GetCode() == 200 && !c.pass {
+						t.Fatalf(" Callback Set returned an unexpected success - %d", rsp.GetStatus().GetCode())
+					}
+
+					if rsp.GetStatus().GetCode() != 200 && c.pass {
+						t.Fatalf(" Callback Set returned an unexpected failure - %d", rsp.GetStatus().GetCode())
+					}
+
+					// HTTP Response
+					if rsp.GetCode() != int32(c.httpCode) {
+						t.Fatalf(" returned an unexpected response code - %d", rsp.GetCode())
+						return
+					}
+
+					// Validate Response Header
+					v, ok := rsp.GetHeaders()["server"]
+					if (!ok || v != "tarmac") && rsp.GetCode() == 200 {
+						t.Errorf(" returned an unexpected header - %s", v)
+					}
+
+					// Validate Payload
+					if len(rsp.GetBody()) > 0 {
+						switch string(rsp.GetBody()) {
+						case "PUT", "POST", "PATCH":
+							return
+						default:
+							t.Errorf(" returned unexpected payload - %s", rsp.GetBody())
+						}
+					}
+				})
 			})
 		}
 	}
+}
+
+func TestResponseBodySizeLimit(t *testing.T) {
+	// Test server that returns configurable response sizes
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+
+		// Check query parameter for response size
+		sizeStr := r.URL.Query().Get("size")
+		if sizeStr == "" {
+			sizeStr = "1024" // Default 1KB
+		}
+
+		size := 1024
+		if s, err := fmt.Sscanf(sizeStr, "%d", &size); err != nil || s != 1 {
+			http.Error(w, "Invalid size parameter", http.StatusBadRequest)
+			return
+		}
+
+		// Generate response of specified size with repeating pattern
+		// Use a meaningful pattern instead of just 'A' characters
+		pattern := "This is test data for HTTP response body size limiting. "
+		patternBytes := []byte(pattern)
+		data := make([]byte, size)
+
+		for i := range size {
+			data[i] = patternBytes[i%len(patternBytes)]
+		}
+		_, _ = w.Write(data)
+	}))
+	defer ts.Close()
+
+	testCases := []struct {
+		name            string
+		config          Config
+		responseSize    int
+		expectTruncated bool
+		description     string
+	}{
+		{
+			name:            "Default 10MB limit with small response",
+			config:          Config{}, // Use default
+			responseSize:    1024,     // 1KB
+			expectTruncated: false,
+			description:     "Small response should not be truncated with default config",
+		},
+		{
+			name:            "Custom 2KB limit with 1KB response",
+			config:          Config{MaxResponseBodySize: 2048}, // 2KB
+			responseSize:    1024,                              // 1KB
+			expectTruncated: false,
+			description:     "Response smaller than limit should not be truncated",
+		},
+		{
+			name:            "Custom 2KB limit with 3KB response",
+			config:          Config{MaxResponseBodySize: 2048}, // 2KB
+			responseSize:    3072,                              // 3KB
+			expectTruncated: true,
+			description:     "Response larger than limit should be truncated",
+		},
+		{
+			name:            "Custom 2KB limit with exactly 2KB response",
+			config:          Config{MaxResponseBodySize: 2048}, // 2KB
+			responseSize:    2048,                              // 2KB
+			expectTruncated: false,
+			description:     "Response exactly at limit should not be truncated",
+		},
+		{
+			name:            "Zero config uses default 10MB",
+			config:          Config{MaxResponseBodySize: 0}, // Should use default
+			responseSize:    1024,                           // 1KB
+			expectTruncated: false,
+			description:     "Zero config should use default 10MB limit",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create HTTP client with custom config
+			h, err := New(tc.config)
+			if err != nil {
+				t.Fatalf("Unable to create HTTP Client - %s", err)
+			}
+
+			// Test both JSON and Protobuf interfaces
+			t.Run("JSON", func(t *testing.T) {
+				url := fmt.Sprintf("%s?size=%d", ts.URL, tc.responseSize)
+				jsonReq := fmt.Sprintf(`{"method":"GET","headers":{},"insecure":true,"url":"%s"}`, url)
+
+				b, err := h.Call([]byte(jsonReq))
+				if err != nil {
+					t.Fatalf("HTTP call failed: %s", err)
+				}
+
+				var rsp tarmac.HTTPClientResponse
+				if err := ffjson.Unmarshal(b, &rsp); err != nil {
+					t.Fatalf("Failed to unmarshal JSON response: %s", err)
+				}
+
+				if rsp.Status.Code != 200 {
+					t.Fatalf("Expected successful status, got %d: %s", rsp.Status.Code, rsp.Status.Status)
+				}
+
+				// Decode base64 body
+				body, err := base64.StdEncoding.DecodeString(rsp.Body)
+				if err != nil {
+					t.Fatalf("Failed to decode response body: %s", err)
+				}
+
+				expectedSize := tc.responseSize
+				maxSize := tc.config.MaxResponseBodySize
+				if maxSize <= 0 {
+					maxSize = 10 * 1024 * 1024 // Default 10MB
+				}
+
+				if tc.expectTruncated {
+					expectedSize = int(maxSize)
+				}
+
+				if len(body) != expectedSize {
+					t.Errorf("%s: expected body length %d, got %d", tc.description, expectedSize, len(body))
+				}
+
+				// Generate expected data for MD5 verification
+				pattern := "This is test data for HTTP response body size limiting. "
+				patternBytes := []byte(pattern)
+				expectedData := make([]byte, expectedSize)
+				for i := range expectedSize {
+					expectedData[i] = patternBytes[i%len(patternBytes)]
+				}
+
+				// Verify data integrity using MD5 checksum
+				expectedMD5 := fmt.Sprintf("%x", md5.Sum(expectedData))
+				actualMD5 := fmt.Sprintf("%x", md5.Sum(body))
+
+				if expectedMD5 != actualMD5 {
+					t.Errorf("%s: MD5 checksum mismatch. Expected %s, got %s", tc.description, expectedMD5, actualMD5)
+				}
+			})
+
+			t.Run("Protobuf", func(t *testing.T) {
+				url := fmt.Sprintf("%s?size=%d", ts.URL, tc.responseSize)
+				protoReq := &proto.HTTPClient{
+					Method:   "GET",
+					Headers:  map[string]string{},
+					Insecure: true,
+					Url:      url,
+				}
+
+				msg, err := pb.Marshal(protoReq)
+				if err != nil {
+					t.Fatalf("Failed to marshal protobuf request: %s", err)
+				}
+
+				b, err := h.Call(msg)
+				if err != nil {
+					t.Fatalf("HTTP call failed: %s", err)
+				}
+
+				var rsp proto.HTTPClientResponse
+				if err := pb.Unmarshal(b, &rsp); err != nil {
+					t.Fatalf("Failed to unmarshal protobuf response: %s", err)
+				}
+
+				if rsp.GetStatus().GetCode() != 200 {
+					t.Fatalf(
+						"Expected successful status, got %d: %s",
+						rsp.GetStatus().GetCode(),
+						rsp.GetStatus().GetStatus(),
+					)
+				}
+
+				expectedSize := tc.responseSize
+				maxSize := tc.config.MaxResponseBodySize
+				if maxSize <= 0 {
+					maxSize = 10 * 1024 * 1024 // Default 10MB
+				}
+
+				if tc.expectTruncated {
+					expectedSize = int(maxSize)
+				}
+
+				if len(rsp.GetBody()) != expectedSize {
+					t.Errorf("%s: expected body length %d, got %d", tc.description, expectedSize, len(rsp.GetBody()))
+				}
+
+				// Generate expected data for MD5 verification
+				pattern := "This is test data for HTTP response body size limiting. "
+				patternBytes := []byte(pattern)
+				expectedData := make([]byte, expectedSize)
+				for i := range expectedSize {
+					expectedData[i] = patternBytes[i%len(patternBytes)]
+				}
+
+				// Verify data integrity using MD5 checksum
+				expectedMD5 := fmt.Sprintf("%x", md5.Sum(expectedData))
+				actualMD5 := fmt.Sprintf("%x", md5.Sum(rsp.GetBody()))
+
+				if expectedMD5 != actualMD5 {
+					t.Errorf("%s: MD5 checksum mismatch. Expected %s, got %s", tc.description, expectedMD5, actualMD5)
+				}
+			})
+		})
+	}
+}
+
+func TestRequestCreationAndExecutionErrors(t *testing.T) {
+	h, err := New(Config{})
+	if err != nil {
+		t.Fatalf("Unable to create HTTP Client - %s", err)
+	}
+
+	t.Run("JSON invalid URL returns request creation error", func(t *testing.T) {
+		b, err := h.Call([]byte(`{"method":"GET","headers":{"teapot":"true"},"url":"://bad-url"}`))
+		if err == nil {
+			t.Fatal("expected request creation error")
+		}
+
+		var rsp tarmac.HTTPClientResponse
+		if err := ffjson.Unmarshal(b, &rsp); err != nil {
+			t.Fatalf("Failed to unmarshal JSON response: %s", err)
+		}
+
+		if rsp.Status.Code != http.StatusBadRequest {
+			t.Fatalf("unexpected status code: got %d want %d", rsp.Status.Code, http.StatusBadRequest)
+		}
+		if !strings.Contains(rsp.Status.Status, "Unable to create HTTP request") {
+			t.Fatalf("unexpected status message: %s", rsp.Status.Status)
+		}
+	})
+
+	t.Run("Protobuf invalid URL returns request creation error", func(t *testing.T) {
+		msg, err := pb.Marshal(&proto.HTTPClient{
+			Method: "GET",
+			Url:    "://bad-url",
+		})
+		if err != nil {
+			t.Fatalf("Unable to marshal protobuf request - %s", err)
+		}
+
+		b, err := h.Call(msg)
+		if err == nil {
+			t.Fatal("expected request creation error")
+		}
+
+		var rsp proto.HTTPClientResponse
+		if err := pb.Unmarshal(b, &rsp); err != nil {
+			t.Fatalf("Failed to unmarshal protobuf response: %s", err)
+		}
+
+		if rsp.GetStatus().GetCode() != http.StatusBadRequest {
+			t.Fatalf("unexpected status code: got %d want %d", rsp.GetStatus().GetCode(), http.StatusBadRequest)
+		}
+		if !strings.Contains(rsp.GetStatus().GetStatus(), "Unable to create HTTP request") {
+			t.Fatalf("unexpected status message: %s", rsp.GetStatus().GetStatus())
+		}
+	})
+
+	t.Run("JSON execute error returns server error without panic", func(t *testing.T) {
+		b, err := h.Call([]byte(`{"method":"GET","headers":{},"url":"http://127.0.0.1:1"}`))
+		if err == nil {
+			t.Fatal("expected execution error")
+		}
+
+		var rsp tarmac.HTTPClientResponse
+		if err := ffjson.Unmarshal(b, &rsp); err != nil {
+			t.Fatalf("Failed to unmarshal JSON response: %s", err)
+		}
+
+		if rsp.Status.Code != http.StatusInternalServerError {
+			t.Fatalf("unexpected status code: got %d want %d", rsp.Status.Code, http.StatusInternalServerError)
+		}
+		if !strings.Contains(rsp.Status.Status, "Unable to execute HTTP request") {
+			t.Fatalf("unexpected status message: %s", rsp.Status.Status)
+		}
+	})
+
+	t.Run("Protobuf execute error returns server error", func(t *testing.T) {
+		msg, err := pb.Marshal(&proto.HTTPClient{
+			Method: "GET",
+			Url:    "http://127.0.0.1:1",
+		})
+		if err != nil {
+			t.Fatalf("Unable to marshal protobuf request - %s", err)
+		}
+
+		b, err := h.Call(msg)
+		if err == nil {
+			t.Fatal("expected execution error")
+		}
+
+		var rsp proto.HTTPClientResponse
+		if err := pb.Unmarshal(b, &rsp); err != nil {
+			t.Fatalf("Failed to unmarshal protobuf response: %s", err)
+		}
+
+		if rsp.GetStatus().GetCode() != http.StatusInternalServerError {
+			t.Fatalf(
+				"unexpected status code: got %d want %d",
+				rsp.GetStatus().GetCode(),
+				http.StatusInternalServerError,
+			)
+		}
+		if !strings.Contains(rsp.GetStatus().GetStatus(), "Unable to execute HTTP request") {
+			t.Fatalf("unexpected status message: %s", rsp.GetStatus().GetStatus())
+		}
+	})
 }

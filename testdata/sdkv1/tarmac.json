@@ -1,0 +1,72 @@
+{
+  "services": {
+    "test-service": {
+      "name": "test-service",
+      "functions": {
+        "default": {
+          "filepath": "/testdata/base/default/tarmac.wasm"
+        },
+        "kv": {
+          "filepath": "/testdata/sdkv1/kv/tarmac.wasm",
+          "pool_size": 1000
+        },
+        "logger": {
+          "filepath": "/testdata/sdkv1/logger/tarmac.wasm"
+        },
+        "sql": {
+          "filepath": "/testdata/sdkv1/sql/tarmac.wasm",
+          "pool_size": 10
+        },
+        "func": {
+          "filepath": "/testdata/base/function/tarmac.wasm",
+          "pool_size": 1
+        }
+      },
+      "routes": [
+        {
+          "type": "init",
+          "function": "default"
+        },
+        {
+          "type": "http",
+          "path": "/",
+          "methods": ["GET", "POST", "PUT"],
+          "function": "default"
+        },
+        {
+          "type": "http",
+          "path": "/kv",
+          "methods": ["GET"],
+          "function": "kv"
+        },
+        {
+          "type": "http",
+          "path": "/logger",
+          "methods": ["GET", "POST"],
+          "function": "logger"
+        },
+        {
+          "type": "http",
+          "path": "/sql",
+          "methods": ["GET"],
+          "function": "sql"
+        },
+        {
+          "type": "http",
+          "path": "/func",
+          "methods": ["GET"],
+          "function": "func"
+        },
+        {
+          "type": "scheduled_task",
+          "frequency": 15,
+          "function": "default"
+        },
+        {
+          "type": "function",
+          "function": "logger"
+        }
+      ]
+    }
+  }
+}
